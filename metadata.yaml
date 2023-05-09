@@ -1,0 +1,23 @@
+name: wireguard
+summary: Kubernetes operator for Wireguard VPN server 
+maintainers:
+    - Alberto Garcia Perez <alberto.garciap@um.es>
+description: |
+    Wireguard is used to set up a Virtual Private Network (VPN) to connect
+    several clients. These clients can access  others services through a
+    secure tunnel, protecting network traffic.
+tags:
+    - VPN
+    - Connection
+series:
+    - kubernetes
+deployment:
+    service: loadbalancer
+resources:
+    image:
+        type: oci-image
+        description: Docker image for wireguard
+        upstream-source: "jeffreysilver/wireguard_server:latest"
+#provides:
+#    prometheus-target:
+#        interface: http

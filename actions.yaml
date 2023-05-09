@@ -1,0 +1,33 @@
+init-config:
+    description: "Action to start and configure the server"
+get-server-data:
+    description: "Action to get the data of the server"
+add-client:
+    description: "Action to add a client and generate its private IP address"
+
+    params:
+        public_key:
+            description: "Public key of the client"
+            type: string
+            default: ""
+    required:
+      - public_key
+
+dissconnect-client:
+    description:  "Action to remove the conection with a client"
+    
+    params:
+        public_key:
+            description: "Public key of the client"
+            type: string
+            default: ""
+        
+        ip:
+            description: "Private IP of the client"
+            type: string
+            default: ""
+    required:
+      - public_key
+      - ip
+
+
