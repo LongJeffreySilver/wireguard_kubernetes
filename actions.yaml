@@ -6,18 +6,18 @@ add-client:
     description: "Action to add a client and generate its private IP address"
 
     params:
-        public_key:
+        public-key:
             description: "Public key of the client"
             type: string
             default: ""
     required:
-      - public_key
+      - public-key
 
-dissconnect-client:
+disconnect-client:
     description:  "Action to remove the conection with a client"
     
     params:
-        public_key:
+        public-key:
             description: "Public key of the client"
             type: string
             default: ""
@@ -27,7 +27,8 @@ dissconnect-client:
             type: string
             default: ""
     required:
-      - public_key
+      - public-key
       - ip
 
-
+disconnect-server:
+    description:  "Action to disconnect the server conection"
