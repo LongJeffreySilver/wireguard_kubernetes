@@ -3,7 +3,7 @@
 import logging
 from ops.charm import CharmBase
 from ops.main import main
-from ops.model import ActiveStatus, MaintenanceStatus, BlockedStatus
+from ops.model import ActiveStatus, MaintenanceStatus
 import time
 import subprocess
 
@@ -17,7 +17,7 @@ class wgServices(CharmBase):
         for i in range(1,11):
             ip = "192.168.1."
             aux = 200 + i
-            ip = ip + str(aux)
+            ip = ip + str(aux) +"/32"
             self.free_IP_list.append(ip)
 
         """Initialize charm and configure states and events to observe."""
@@ -26,7 +26,8 @@ class wgServices(CharmBase):
         self.framework.observe(self.on.init_config_action, self._on_init_config_action)
         self.framework.observe(self.on.get_server_data_action,self._on_get_server_data_action)
         self.framework.observe(self.on.add_client_action, self._on_add_client_action)
-        self.framework.observe(self.on.dissconnect_client_action, self._on_dissconnect_client_action)
+        self.framework.observe(self.on.disconnect_client_action, self._on_disconnect_client_action)
+        self.framework.observe(self.on.disconnect_server_action, self._on_disconnect_server_action)
 
 
     def checkInterface(self, interface_list):
@@ -62,7 +63,7 @@ class wgServices(CharmBase):
 
     def _on_init_config_action(self, event):
         self.generate_keys()
-        interface_list = ["enp","eno","ens","eth"]
+        interface_list = ["enp","eno","ens","eth","wlan","wlp"]
         iface_name = self.checkInterface(interface_list)
         server_listening_port = "41194"
         if(iface_name != None):
@@ -77,85 +78,103 @@ class wgServices(CharmBase):
                 + "Address = 192.168.1.200\n"
                 + "PrivateKey = " + server_priv_key
                 + "ListenPort = " + server_listening_port + "\n"
-                + "PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -A FORWARD -o %i -j ACCEPT; iptables -t nat -A POSTROUTING -o " + iface_name + " -j MASQUERADE\n"## Cambiar la interfaz de red enp0s3 por la que tenga el servidor
-                + "PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -D FORWARD -o %i -j ACCEPT; iptables -t nat -D POSTROUTING -o " + iface_name + "-j MASQUERADE" ## Cambiar la interfaz de red enp0s3 por la que tenga el servidor
-                )
+                + "PostUp = iptables -t nat -A POSTROUTING -s 192.168.1.0/24 -o " + iface_name + " -j SNAT --to-source 155.54.99.195\n"
+                + "PostDown = iptables -t nat -D POSTROUTING -s 192.168.1.0/24 -o " + iface_name + " -j SNAT --to-source 155.54.99.195\n" 
+                #+ "PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -A FORWARD -o %i -j ACCEPT; iptables -t nat -A POSTROUTING -o " + iface_name + " -j MASQUERADE\n"## Cambiar la interfaz de red enp0s3 por la que tenga el servidor
+                #+ "PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -D FORWARD -o %i -j ACCEPT; iptables -t nat -D POSTROUTING -o " + iface_name + " -j MASQUERADE\n" ## Cambiar la interfaz de red enp0s3 por la que tenga el servidor
+                + "SaveConfig = true\n")
                 conf_file.close()
+                time.sleep(2)
 
-                subprocess.Popen(["systemctl", "start", "wg-quick@" + self.server_name])
-                time.sleep(5)
+                subprocess.run(["wg-quick", "up", self.server_name],capture_output=True, text=True)
+                time.sleep(2)
 
-                wg_command = subprocess.run(["sudo", "wg"], capture_output=True, text=True)
+                wg_command = subprocess.run(["wg"], capture_output=True, text=True)
                 wg_text = wg_command.stdout.splitlines()
+                wg_output = ""
+                for lines in wg_text:
+                    wg_output = wg_output + lines + "\n"
 
                 event.set_results({
-                    "output": f"Server started successfully: \n {wg_text}"
+                    "output": f"Server started successfully:\n{wg_output}"
                 })
 
             except Exception as e:
-                event.fail(f"Server initiation failed due an unespected exception named: {e}")
+                event.fail(f"1. Server initiation failed due an unespected exception named: {e}")
         else:
-            event.fail(f"Server initiation failed due a problem with network interfaces: {e}")
+            event.fail(f"2. Server initiation failed due a problem with network interfaces: {e}")
 
     def _on_get_server_data_action(self, event):
         try:
 
-            wg_command = subprocess.run(["sudo", "wg"], capture_output=True, text=True)
+            wg_command = subprocess.run(["wg"], capture_output=True, text=True)
             wg_text = wg_command.stdout.splitlines()
             
             process_dig = subprocess.run(["dig", "+short", "myip.opendns.com", "@resolver1.opendns.com"], capture_output=True, text=True)
             server_public_ip = process_dig.stdout.splitlines()[0]
+
+            wg_command = subprocess.run(["wg"], capture_output=True, text=True)
+            wg_text = wg_command.stdout.splitlines()
+            wg_output = ""
+            for lines in wg_text:
+                wg_output = wg_output + lines + "\n"
             event.set_results({
-                    "output": f"Server with public IP {server_public_ip} started successfully: \n {wg_text}"
+                    "output": f"Server with public IP {server_public_ip} started successfully:\n{wg_output}"
             })
         except Exception as e:
             event.fail(f"Server data failed due an unespected exception named: {e}")
 
-    def _on_add_client_action(self, event): #El cliente pasa su clave publica y se le genera una IP privada. Ademas, ya se le añade con esa IP privada
+    def _on_add_client_action(self, event):
         try:
             
-            client_ip = self.free_IP_list.pop(0)
-            client_key_string = event.params["public_key"]
-            server_conf_file = open("/etc/wireguard/"+ self.server_name + ".conf","a")
-            new_client = "\n[Peer]\n" + "PublicKey = " + client_key_string + "\n"+ "AllowedIPs = " + client_ip + "/32\n" + "PersistentKeepAlive = 25\n" + "\n"
+            client_key_string = event.params["public-key"]
 
-            server_conf_file.write(new_client)
+            server_config_process = subprocess.Popen(["wg", "show"], stdout=subprocess.PIPE)
+            grep_process = subprocess.Popen(["grep", "-o","192.168.1.*"],  stdin=server_config_process.stdout, stdout=subprocess.PIPE)
+            output, _ = grep_process.communicate()
+            lines = output.decode()
 
-            server_conf_file.close()
-            time.sleep(5)
-            subprocess.Popen(["systemctl", "restart", "wg-quick@" + self.server_name])
-            time.sleep(5)
-
+            no_ip = True
+            while no_ip:
+                if len(self.free_IP_list) > 0:
+                    client_ip = self.free_IP_list.pop(0)
+                    if client_ip not in lines:
+                        no_ip = False
+                        subprocess.run(["wg", "set", self.server_name,"peer", client_key_string, "allowed-ips", client_ip, "persistent-keepalive", "25"])
+                        event.set_results({
+                                "output": f"This is your private IP: {client_ip}\nClient added\n"
+                        })
+                        return
+                else:
+                    break
             event.set_results({
-                    "output": f"This is your private IP: {client_ip}/32\n Client added\n"
-            })
+                "output": f"No IPs available"
+            })        
+
         except Exception as e:
             event.fail(f"Server failed due an unespected exception named: {e}")
 
-    def _on_dissconnect_client_action(self, event):
+    def _on_disconnect_client_action(self, event):
         
         try:
-            client_key_string = event.params["public_key"]
+            client_key_string = event.params["public-key"]
             client_priv_ip = event.params["ip"]
-            with open(self.server_name, "r") as server_conf_file:
-                lines = server_conf_file.readlines()
+            
+            server_config_process = subprocess.run(["wg", "show"],  capture_output=True, text=True)
+            lines = server_config_process.stdout.splitlines()
+
             index = 0
-            is_client = False
+            check_client = False
             for line in lines:
                 if client_key_string in line:
                     key_index = index
                     if client_priv_ip in lines[key_index+1]:
-                        key_index -= 1
-                        for i in range(0,5):
-                            lines.pop(key_index)
-                        is_client = True
+                        check_client = True
                         continue
                 index += 1
-            with open(self.server_name, "w") as server_conf_file:
-                for line in lines:
-                    server_conf_file.write(line)
             
-            if(is_client == True):
+            if check_client == True:
+                subprocess.run(["wg", "set", self.server_name,"peer", client_key_string ,"remove"])
                 event.set_results({
                     "output": f"Client removed\n"
                 })
@@ -166,6 +185,17 @@ class wgServices(CharmBase):
         except Exception as e:
             event.fail(f"Server failed due an unespected exception named: {e}")
 
+    def _on_disconnect_server_action(self, event):
+        try:
+            subprocess.run(["wg-quick", "down", self.server_name], capture_output=True, text=True)
+            file_route = "/etc/wireguard/" + self.server_name + ".conf"
+            open(file_route, 'w').close()
+
+            event.set_results({
+                "output" :  f"Server disconnected."
+            })
+        except Exception as e:
+            event.fail(f"Server failed due to an unexpected exception while disconnecting.: {e}")
 
     def configure_pod(self, event):
         if not self.unit.is_leader():
@@ -175,7 +205,7 @@ class wgServices(CharmBase):
         containers = [
             {
                 "name": self.framework.model.app.name,
-                "image": "jeffreysilver/wireguard_server:latest",
+                "image": "jeffreysilver/wireguard_server:prueba",
                 "ports": [
                     {
                         "name": "wireguard",
@@ -189,11 +219,9 @@ class wgServices(CharmBase):
                         "protocol": "TCP",
                     }
                 ],
-                #"command": ["/usr/sbin/init"],
-                "command": ["/bin/bash","-ce"], #"/usr/sbin/init & tail -f /dev/null"
-                "args": ["tail -f /dev/null && /usr/sbin/init"],
+                "command": ["/bin/bash","-ce","tail -f /dev/null"],
                 "kubernetes": { "securityContext": { "privileged": True}}
-            }
+            }            
         ]
 
         kubernetesResources = {"pod": {"hostNetwork": True}}
