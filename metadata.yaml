@@ -17,7 +17,7 @@ resources:
     image:
         type: oci-image
         description: Docker image for wireguard
-        upstream-source: "jeffreysilver/wireguard_server:latest"
+        upstream-source: "jeffreysilver/wireguard_server:prueba"
 #provides:
 #    prometheus-target:
 #        interface: http
