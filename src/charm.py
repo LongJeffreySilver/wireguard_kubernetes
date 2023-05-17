@@ -19,6 +19,7 @@ class wgServices(CharmBase):
             aux = 200 + i
             ip = ip + str(aux) +"/32"
             self.free_IP_list.append(ip)
+        self.server_public_ip = ""
 
         """Initialize charm and configure states and events to observe."""
         super().__init__(*args)
@@ -59,7 +60,7 @@ class wgServices(CharmBase):
         processChmod = subprocess.Popen(["chmod", "600", "/etc/wireguard/private_key.key", "/etc/wireguard/public_key.key.pub" ])
 
         file.close()
-        time.sleep(3)
+        time.sleep(1)
 
     def _on_init_config_action(self, event):
         self.generate_keys()
@@ -71,6 +72,9 @@ class wgServices(CharmBase):
                 file_server_priv_key = open("/etc/wireguard/private_key.key",'r')
                 server_priv_key = file_server_priv_key.readline()
                 file_server_priv_key.close()
+                
+                process_dig = subprocess.run(["dig", "+short", "myip.opendns.com", "@resolver1.opendns.com"], capture_output=True, text=True)
+                self.server_public_ip = process_dig.stdout.splitlines()[0]
 
                 conf_file = open("/etc/wireguard/"+ self.server_name + ".conf","w")
                 conf_file.write(
@@ -78,16 +82,14 @@ class wgServices(CharmBase):
                 + "Address = 192.168.1.200\n"
                 + "PrivateKey = " + server_priv_key
                 + "ListenPort = " + server_listening_port + "\n"
-                + "PostUp = iptables -t nat -A POSTROUTING -s 192.168.1.0/24 -o " + iface_name + " -j SNAT --to-source 155.54.99.195\n"
-                + "PostDown = iptables -t nat -D POSTROUTING -s 192.168.1.0/24 -o " + iface_name + " -j SNAT --to-source 155.54.99.195\n" 
-                #+ "PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -A FORWARD -o %i -j ACCEPT; iptables -t nat -A POSTROUTING -o " + iface_name + " -j MASQUERADE\n"## Cambiar la interfaz de red enp0s3 por la que tenga el servidor
-                #+ "PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -D FORWARD -o %i -j ACCEPT; iptables -t nat -D POSTROUTING -o " + iface_name + " -j MASQUERADE\n" ## Cambiar la interfaz de red enp0s3 por la que tenga el servidor
+                + "PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -A FORWARD -o %i -j ACCEPT; iptables -t nat -A POSTROUTING -o " + iface_name + " -j MASQUERADE \n"## Cambiar la interfaz de red enp0s3 por la que tenga el servidor
+                + "PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -D FORWARD -o %i -j ACCEPT; iptables -t nat -D POSTROUTING -o " + iface_name + " -j MASQUERADE \n" ## Cambiar la interfaz de red enp0s3 por la que tenga el servidor
                 + "SaveConfig = true\n")
                 conf_file.close()
-                time.sleep(2)
+                time.sleep(1)
 
                 subprocess.run(["wg-quick", "up", self.server_name],capture_output=True, text=True)
-                time.sleep(2)
+                time.sleep(1)
 
                 wg_command = subprocess.run(["wg"], capture_output=True, text=True)
                 wg_text = wg_command.stdout.splitlines()
@@ -106,12 +108,9 @@ class wgServices(CharmBase):
 
     def _on_get_server_data_action(self, event):
         try:
-
-            wg_command = subprocess.run(["wg"], capture_output=True, text=True)
-            wg_text = wg_command.stdout.splitlines()
-            
+       
             process_dig = subprocess.run(["dig", "+short", "myip.opendns.com", "@resolver1.opendns.com"], capture_output=True, text=True)
-            server_public_ip = process_dig.stdout.splitlines()[0]
+            self.server_public_ip = process_dig.stdout.splitlines()[0]
 
             wg_command = subprocess.run(["wg"], capture_output=True, text=True)
             wg_text = wg_command.stdout.splitlines()
@@ -119,7 +118,7 @@ class wgServices(CharmBase):
             for lines in wg_text:
                 wg_output = wg_output + lines + "\n"
             event.set_results({
-                    "output": f"Server with public IP {server_public_ip} started successfully:\n{wg_output}"
+                    "output": f"Server with public IP {self.server_public_ip} started successfully:\n{wg_output}"
             })
         except Exception as e:
             event.fail(f"Server data failed due an unespected exception named: {e}")
@@ -141,6 +140,10 @@ class wgServices(CharmBase):
                     if client_ip not in lines:
                         no_ip = False
                         subprocess.run(["wg", "set", self.server_name,"peer", client_key_string, "allowed-ips", client_ip, "persistent-keepalive", "25"])
+
+                        subprocess.run(["wg-quick", "down", self.server_name],capture_output=True, text=True)
+                        subprocess.run(["wg-quick", "up", self.server_name],capture_output=True, text=True)
+
                         event.set_results({
                                 "output": f"This is your private IP: {client_ip}\nClient added\n"
                         })
@@ -175,6 +178,8 @@ class wgServices(CharmBase):
             
             if check_client == True:
                 subprocess.run(["wg", "set", self.server_name,"peer", client_key_string ,"remove"])
+                subprocess.run(["wg-quick", "down", self.server_name],capture_output=True, text=True) #FIXME falta por probar pero debería ir
+                subprocess.run(["wg-quick", "up", self.server_name],capture_output=True, text=True)
                 event.set_results({
                     "output": f"Client removed\n"
                 })
