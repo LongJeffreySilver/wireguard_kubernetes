@@ -210,7 +210,7 @@ class wgServices(CharmBase):
         containers = [
             {
                 "name": self.framework.model.app.name,
-                "image": "jeffreysilver/wireguard_server:prueba",
+                "image": "jeffreysilver/wireguard_server:kubernetes",
                 "ports": [
                     {
                         "name": "wireguard",
