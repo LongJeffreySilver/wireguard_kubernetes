@@ -171,7 +171,7 @@ class wgServices(CharmBase):
             for line in lines:
                 if client_key_string in line:
                     key_index = index
-                    if client_priv_ip in lines[key_index+1]:
+                    if client_priv_ip in lines[key_index+2]:
                         check_client = True
                         continue
                 index += 1
