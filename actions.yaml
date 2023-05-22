@@ -32,3 +32,6 @@ disconnect-client:
 
 disconnect-server:
     description:  "Action to disconnect the server conection"
+
+health-check:
+    description: "Check if Wireguard service is running"
