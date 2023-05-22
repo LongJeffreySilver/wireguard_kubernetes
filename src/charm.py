@@ -83,8 +83,8 @@ class wgServices(CharmBase):
                 + "Address = 192.168.1.200\n"
                 + "PrivateKey = " + server_priv_key
                 + "ListenPort = " + server_listening_port + "\n"
-                + "PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -A FORWARD -o %i -j ACCEPT; iptables -t nat -A POSTROUTING -o " + iface_name + " -j MASQUERADE \n"## Cambiar la interfaz de red enp0s3 por la que tenga el servidor
-                + "PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -D FORWARD -o %i -j ACCEPT; iptables -t nat -D POSTROUTING -o " + iface_name + " -j MASQUERADE \n" ## Cambiar la interfaz de red enp0s3 por la que tenga el servidor
+                + "PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -A FORWARD -o %i -j ACCEPT; iptables -t nat -A POSTROUTING -o " + iface_name + " -j MASQUERADE \n"
+                + "PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -D FORWARD -o %i -j ACCEPT; iptables -t nat -D POSTROUTING -o " + iface_name + " -j MASQUERADE \n"
                 + "SaveConfig = true\n")
                 conf_file.close()
                 time.sleep(1)
@@ -103,9 +103,9 @@ class wgServices(CharmBase):
                 })
 
             except Exception as e:
-                event.fail(f"1. Server initiation failed due an unespected exception named: {e}")
+                event.fail(f"Server initiation failed due an unespected exception named: {e}")
         else:
-            event.fail(f"2. Server initiation failed due a problem with network interfaces: {e}")
+            event.fail(f"Server initiation failed due a problem with network interfaces: {e}")
 
     def _on_get_server_data_action(self, event):
         try:
@@ -179,7 +179,7 @@ class wgServices(CharmBase):
             
             if check_client == True:
                 subprocess.run(["wg", "set", self.server_name,"peer", client_key_string ,"remove"])
-                subprocess.run(["wg-quick", "down", self.server_name],capture_output=True, text=True) #FIXME falta por probar pero debería ir
+                subprocess.run(["wg-quick", "down", self.server_name],capture_output=True, text=True)
                 subprocess.run(["wg-quick", "up", self.server_name],capture_output=True, text=True)
                 event.set_results({
                     "output": f"Client removed\n"
@@ -230,13 +230,17 @@ class wgServices(CharmBase):
         return byte_value, units[unit_index]
     
     def _on_health_check_action(self, event):
-        
+        """Stop Wireguard service"""
         try:
 
             wg_command = subprocess.run(["wg"], capture_output=True, text=True)
             wg_text = wg_command.stdout.splitlines()
             connected = len(wg_text)
             if connected > 0:
+                list_of_proc_objects = []
+                ps_info = {"name": "wg-quick", "cpu_percent": "0.0", "ram_usage": "0.00"}
+                list_of_proc_objects.append(ps_info)
+
                 server_config_process = subprocess.Popen(["wg", "show"], stdout=subprocess.PIPE)
                 grep_process = subprocess.Popen(["grep", "transfer"],  stdin=server_config_process.stdout, stdout=subprocess.PIPE)
                 output, _ = grep_process.communicate()
@@ -259,19 +263,21 @@ class wgServices(CharmBase):
                         accumulated_sent = accumulated_sent + number_sent
                     total_received,unit_received = self.convert_bytes(accumulated_received)
                     total_sent,unit_sent = self.convert_bytes(accumulated_sent)
-                    network_usage = "Total received: " + str(round(total_received,2)) + unit_received + "\n" + "Total sent: " + str(round(total_sent,2)) + unit_sent+"\n"
+                    net_usage={"bytes_sent": str(round(total_sent,2)) + unit_sent , "bytes_recv": str(round(total_received,2)) + unit_received}
+
                     event.set_results({
                         "output": f"Status: Wireguard is running",
-                        "service-usage": f"0",
-                        "network-usage": network_usage
+                        "service-usage": list_of_proc_objects,
+                        "network-usage": str(net_usage)
                     })
                     return
                 
                 else:
+                    net_usage={"bytes_sent": "0", "bytes_recv": "0"}
                     event.set_results({
                         "output": f"Status: Wireguard is running, but no currently active connections",
-                        "service-usage": f"0",
-                        "network-usage": f"0"
+                        "service-usage": list_of_proc_objects,
+                        "network-usage": str(net_usage)
                     })
                     return
 
