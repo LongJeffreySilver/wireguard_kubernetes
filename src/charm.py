@@ -29,6 +29,7 @@ class wgServices(CharmBase):
         self.framework.observe(self.on.add_client_action, self._on_add_client_action)
         self.framework.observe(self.on.disconnect_client_action, self._on_disconnect_client_action)
         self.framework.observe(self.on.disconnect_server_action, self._on_disconnect_server_action)
+        self.framework.observe(self.on.health_check_action, self._on_health_check_action)
 
 
     def checkInterface(self, interface_list):
@@ -201,6 +202,85 @@ class wgServices(CharmBase):
             })
         except Exception as e:
             event.fail(f"Server failed due to an unexpected exception while disconnecting.: {e}")
+
+    def to_bytes(self, number, units):
+        total_bytes = 0.00
+        if units == "KiB":
+            total_bytes = number * (2**10)
+        elif units == "MiB":
+            total_bytes = number * (2**20)
+        elif units == "GiB":
+            total_bytes = number * (2**30)
+        elif units == "TiB":
+            total_bytes = number * (2**40)
+        return total_bytes
+    
+    def convert_bytes(self, byte_value):
+        units = ['B', 'KB', 'MB', 'GB', 'TB']
+        base = 1024
+    
+        if byte_value < 0:
+            raise ValueError("Byte value must be a non-negative number")
+    
+        unit_index = 0
+        while byte_value >= base and unit_index < len(units) - 1:
+            byte_value /= base
+            unit_index += 1
+    
+        return byte_value, units[unit_index]
+    
+    def _on_health_check_action(self, event):
+        
+        try:
+
+            wg_command = subprocess.run(["wg"], capture_output=True, text=True)
+            wg_text = wg_command.stdout.splitlines()
+            connected = len(wg_text)
+            if connected > 0:
+                server_config_process = subprocess.Popen(["wg", "show"], stdout=subprocess.PIPE)
+                grep_process = subprocess.Popen(["grep", "transfer"],  stdin=server_config_process.stdout, stdout=subprocess.PIPE)
+                output, _ = grep_process.communicate()
+                string_lines = output.decode()
+                list_lines = string_lines.split()
+                size_list = len(list_lines)
+
+                if size_list > 0:
+                    total_lines = size_list // 7
+                    accumulated_received = 0
+                    accumulated_sent = 0
+                    for i in range(0,total_lines,1):
+                        index_number_received = 1 + (7*i)
+                        index_unit_received = 2 + (7*i)
+                        index_number_sent = 4 + (7*i)
+                        index_unit_sent = 5 + (7*i)
+                        number_received = self.to_bytes(float(list_lines[index_number_received]), list_lines[index_unit_received])
+                        number_sent = self.to_bytes(float(list_lines[index_number_sent]), list_lines[index_unit_sent])
+                        accumulated_received = accumulated_received + number_received
+                        accumulated_sent = accumulated_sent + number_sent
+                    total_received,unit_received = self.convert_bytes(accumulated_received)
+                    total_sent,unit_sent = self.convert_bytes(accumulated_sent)
+                    network_usage = "Total received: " + str(round(total_received,2)) + unit_received + "\n" + "Total sent: " + str(round(total_sent,2)) + unit_sent+"\n"
+                    event.set_results({
+                        "output": f"Status: Wireguard is running",
+                        "service-usage": f"0",
+                        "network-usage": network_usage
+                    })
+                    return
+                
+                else:
+                    event.set_results({
+                        "output": f"Status: Wireguard is running, but no currently active connections",
+                        "service-usage": f"0",
+                        "network-usage": f"0"
+                    })
+                    return
+
+            else:
+                event.set_results({
+                    "output": f"Wireguard: Wireguard service is not running"
+                })
+        except Exception as e:
+            event.fail(f"Health-check: Health-check status failed with the following exception: {e}")
 
     def configure_pod(self, event):
         if not self.unit.is_leader():
